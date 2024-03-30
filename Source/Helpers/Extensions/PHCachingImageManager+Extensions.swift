@@ -11,20 +11,13 @@ import Photos
 
 extension PHCachingImageManager {
     
-    // Set up a common reader for all UIImage read requests.
-    @available(iOS 17.0, *)
-    static let reader: UIImageReader = {
-        var config = UIImageReader.Configuration()
-        config.prefersHighDynamicRange = true
-        return UIImageReader(configuration: config)
-    }()
-    
     private func photoImageRequestOptions() -> PHImageRequestOptions {
         let options = PHImageRequestOptions()
         options.deliveryMode = .highQualityFormat
         options.isNetworkAccessAllowed = true
         options.resizeMode = .exact
         options.isSynchronous = true // Ok since we're already in a background thread
+        options.version = .current
         return options
     }
     
@@ -32,19 +25,29 @@ extension PHCachingImageManager {
 					cropRect: CGRect,
 					targetSize: CGSize,
 					callback: @escaping (UIImage, [String: Any]) -> Void) {
+        
         let options = photoImageRequestOptions()
-    
-        if #available(iOS 17, *) {
-            
-            // Fetch Highiest quality image possible.
+        
+        if #available(iOS 13, *) {
             requestImageDataAndOrientation(for: asset, options: options) { data, _, _, _ in
-                if let data, let image = PHCachingImageManager.reader.image(data: data) {
-                    // TODO: !JR! crop in a way that doesn't upset HDR pipeline
-                    let exifs = self.metadataForImageData(data: data)
-                    callback(image, exifs)
+                if let data = data, let image = UIImage(data: data)?.resetOrientation() {
+                    
+                    // Crop the high quality image manually.
+                    let xCrop: CGFloat = cropRect.origin.x * CGFloat(asset.pixelWidth)
+                    let yCrop: CGFloat = cropRect.origin.y * CGFloat(asset.pixelHeight)
+                    let scaledCropRect = CGRect(x: xCrop,
+                                                y: yCrop,
+                                                width: targetSize.width,
+                                                height: targetSize.height)
+                    if let imageRef = image.cgImage?.cropping(to: scaledCropRect) {
+                        let croppedImage = UIImage(cgImage: imageRef)
+                        let exifs = self.metadataForImageData(data: data)
+                        callback(croppedImage, exifs)
+                    }
                 }
             }
         } else {
+         
             // Fetch Highiest quality image possible.
             requestImageData(for: asset, options: options) { data, _, _, _ in
                 if let data = data, let image = UIImage(data: data)?.resetOrientation() {
